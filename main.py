@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, Canvas, Scrollbar
 import os
 import io
+import threading  # Add this import at the top
 
 try:
     import fitz  # PyMuPDF for PDF rendering and editing
@@ -235,27 +236,45 @@ class PDFCropper:
         if not HAS_PYMUPDF:
             messagebox.showerror("Error", "PyMuPDF is required for blanking functionality.")
             return
-        try:
-            left, top, right, bottom = map(float, [
-                self.left_var.get(), self.top_var.get(),
-                self.right_var.get(), self.bottom_var.get()
-            ])
-            pdf_doc = fitz.open(self.pdf_path)
-            self.apply_blank_to_pdf(pdf_doc, left, top, right, bottom)
-            base_name = os.path.splitext(self.pdf_path)[0]
-            output_pdf_path = os.path.abspath(f"{base_name}_blanked.pdf")
-            pdf_doc.save(output_pdf_path)
-            pdf_doc.close()
-            word = win32.Dispatch("Word.Application")
-            word.Visible = False
-            doc = word.Documents.Open(output_pdf_path)
-            output_docx_path = os.path.abspath(f"{base_name}_blanked.docx")
-            doc.SaveAs2(output_docx_path, FileFormat=16)
-            doc.Close()
-            word.Quit()
-            messagebox.showinfo("Success", f"Blanked and converted file saved as:\n{output_docx_path}")
-        except Exception as e:
-            messagebox.showerror("Error", f"An error occurred: {e}")
+
+        # Show loading bar
+        progress_win = tk.Toplevel(self.root)
+        progress_win.title("Processing...")
+        progress_win.geometry("350x100")
+        progress_win.resizable(False, False)
+        ttk.Label(progress_win, text="Blanking PDF and converting to DOCX (OCR)...").pack(pady=10)
+        progress = ttk.Progressbar(progress_win, mode="indeterminate", length=250)
+        progress.pack(pady=10)
+        progress.start(10)
+        progress_win.grab_set()
+        progress_win.transient(self.root)
+
+        def worker():
+            try:
+                left, top, right, bottom = map(float, [
+                    self.left_var.get(), self.top_var.get(),
+                    self.right_var.get(), self.bottom_var.get()
+                ])
+                pdf_doc = fitz.open(self.pdf_path)
+                self.apply_blank_to_pdf(pdf_doc, left, top, right, bottom)
+                base_name = os.path.splitext(self.pdf_path)[0]
+                output_pdf_path = os.path.abspath(f"{base_name}_blanked.pdf")
+                pdf_doc.save(output_pdf_path)
+                pdf_doc.close()
+                word = win32.Dispatch("Word.Application")
+                word.Visible = False
+                doc = word.Documents.Open(output_pdf_path)
+                output_docx_path = os.path.abspath(f"{base_name}_blanked.docx")
+                doc.SaveAs2(output_docx_path, FileFormat=16)
+                doc.Close()
+                word.Quit()
+                self.root.after(0, lambda: messagebox.showinfo("Success", f"Blanked and converted file saved as:\n{output_docx_path}"))
+            except Exception as e:
+                self.root.after(0, lambda: messagebox.showerror("Error", f"An error occurred: {e}"))
+            finally:
+                self.root.after(0, progress_win.destroy)
+
+        threading.Thread(target=worker, daemon=True).start()
 
 
 def main():
